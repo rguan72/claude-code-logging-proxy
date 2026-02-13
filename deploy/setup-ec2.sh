@@ -33,6 +33,11 @@ Type=simple
 User=$(whoami)
 WorkingDirectory=$APP_DIR
 Environment=LOG_DIR=$APP_DIR/logs
+Environment=S3_BUCKET=${S3_BUCKET:-}
+Environment=S3_PREFIX=${S3_PREFIX:-claude-proxy-logs}
+Environment=ANTHROPIC_API_BASE=${ANTHROPIC_API_BASE:-https://api.anthropic.com}
+Environment=PROXY_PORT=${PROXY_PORT:-8080}
+Environment=UPSTREAM_READ_TIMEOUT=${UPSTREAM_READ_TIMEOUT:-300}
 ExecStart=$APP_DIR/venv/bin/uvicorn proxy:app --host 0.0.0.0 --port 8080
 Restart=always
 RestartSec=5
