@@ -95,9 +95,8 @@ class AsyncJSONLLogger:
         log_root = Path(LOG_DIR)
         if not log_root.exists():
             return
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         for date_dir in sorted(log_root.iterdir()):
-            if not date_dir.is_dir() or date_dir.name == today:
+            if not date_dir.is_dir():
                 continue
             jsonl_file = date_dir / "requests.jsonl"
             if not jsonl_file.exists():

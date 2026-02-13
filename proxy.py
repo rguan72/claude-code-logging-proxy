@@ -123,6 +123,13 @@ async def proxy(request: Request, path: str):
     session_info = extract_session_info(raw_headers, body)
 
     should_log = (url == "/v1/messages")
+    if should_log:
+        try:
+            data = json.loads(body)
+            if data.get("max_tokens") == 1:
+                should_log = False
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
 
     if streaming:
         return await handle_streaming(
@@ -287,8 +294,6 @@ def build_log_entry(
         "request_headers": mask_headers(request_headers),
         "request_body": req_body_parsed,
         "response_status": response_status,
-        "response_headers": mask_headers(response_headers),
-        "response_body": resp_body_parsed,
         "is_streaming": is_streaming,
         "duration_ms": round(duration_ms, 2),
         "time_to_first_byte_ms": round(time_to_first_byte_ms, 2),
