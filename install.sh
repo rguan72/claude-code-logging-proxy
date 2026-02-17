@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROXY_HOST="${PROXY_HOST:-localhost}"
-PROXY_PORT="${PROXY_PORT:-8080}"
-PROXY_URL="http://${PROXY_HOST}:${PROXY_PORT}"
+PROXY_URL="${PROXY_URL:-http://18.224.228.178:8080}"
 
 echo "=== Claude Code Proxy Installer ==="
 echo "Proxy URL: ${PROXY_URL}"
+echo ""
+
+# Check if claude is installed
+if ! command -v claude &> /dev/null; then
+    echo "Error: 'claude' command not found. Install Claude Code first:"
+    echo "  npm install -g @anthropic-ai/claude-code"
+    exit 1
+fi
 
 # Detect shell RC file
 if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "$SHELL")" = "zsh" ]; then
@@ -19,33 +25,31 @@ fi
 
 echo "Shell config: ${RC_FILE}"
 
-EXPORT_LINE="export ANTHROPIC_BASE_URL=\"${PROXY_URL}\""
+ALIAS_LINE="alias claude='ANTHROPIC_BASE_URL=${PROXY_URL} claude'"
 
-# Idempotent: remove old entry, then add new one
+# Idempotent: remove old proxy alias/export, then add new one
 if [ -f "$RC_FILE" ]; then
-    # Cross-platform sed in-place
     if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' '/ANTHROPIC_BASE_URL=.*claude/d' "$RC_FILE"
         sed -i '' '/^export ANTHROPIC_BASE_URL=/d' "$RC_FILE"
     else
+        sed -i '/ANTHROPIC_BASE_URL=.*claude/d' "$RC_FILE"
         sed -i '/^export ANTHROPIC_BASE_URL=/d' "$RC_FILE"
     fi
 fi
 
-echo "$EXPORT_LINE" >> "$RC_FILE"
-echo "Added to ${RC_FILE}: ${EXPORT_LINE}"
+echo "$ALIAS_LINE" >> "$RC_FILE"
+echo "Added to ${RC_FILE}:"
+echo "  ${ALIAS_LINE}"
 
-# Also export for current session
-export ANTHROPIC_BASE_URL="${PROXY_URL}"
-
-# Health check if proxy is reachable
+# Health check
 echo ""
-echo "Checking proxy health..."
-if curl -sf "${PROXY_URL}/health" > /dev/null 2>&1; then
-    echo "Proxy is running and healthy!"
+echo "Checking proxy..."
+if curl -sf --connect-timeout 5 "${PROXY_URL}/health" > /dev/null 2>&1; then
+    echo "Proxy is reachable!"
 else
-    echo "Proxy is not reachable at ${PROXY_URL} (this is OK if you haven't started it yet)."
+    echo "Warning: Proxy not reachable at ${PROXY_URL} (it may be starting up)."
 fi
 
 echo ""
-echo "Done! Run 'source ${RC_FILE}' or open a new terminal to activate."
-echo "Claude Code will now route through the proxy at ${PROXY_URL}"
+echo "Done! Run 'source ${RC_FILE}' or open a new terminal, then use 'claude' as normal."
