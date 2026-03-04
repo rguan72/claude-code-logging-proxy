@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,6 +96,7 @@ class AsyncJSONLLogger:
         log_root = Path(LOG_DIR)
         if not log_root.exists():
             return
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         for date_dir in sorted(log_root.iterdir()):
             if not date_dir.is_dir():
                 continue
@@ -104,3 +106,7 @@ class AsyncJSONLLogger:
             s3_key = f"{S3_PREFIX}/{date_dir.name}/requests.jsonl"
             s3.upload_file(str(jsonl_file), S3_BUCKET, s3_key)
             print(f"Uploaded {jsonl_file} to s3://{S3_BUCKET}/{s3_key}")
+            # Delete local logs after upload, but keep today's (still being written)
+            if date_dir.name != today:
+                shutil.rmtree(date_dir)
+                print(f"Cleaned up local logs: {date_dir}")
