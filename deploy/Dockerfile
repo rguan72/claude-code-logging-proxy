@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY config.py logger.py proxy.py ./
+COPY config.py logger.py proxy.py user_tracker.py ./
 
 EXPOSE 8080
 

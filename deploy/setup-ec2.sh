@@ -13,14 +13,15 @@ sudo mkdir -p "$APP_DIR"
 sudo chown "$(whoami):$(whoami)" "$APP_DIR"
 
 # Copy files
-cp config.py logger.py proxy.py requirements.txt "$APP_DIR/"
+cp config.py logger.py proxy.py user_tracker.py requirements.txt "$APP_DIR/"
 
 # Create venv and install deps
 python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 
-# Create log directory
+# Create log and data directories
 mkdir -p "$APP_DIR/logs"
+mkdir -p "$APP_DIR/data"
 
 # Create systemd service
 sudo tee /etc/systemd/system/claude-proxy.service > /dev/null <<EOF
@@ -38,6 +39,8 @@ Environment=S3_PREFIX=${S3_PREFIX:-claude-proxy-logs}
 Environment=ANTHROPIC_API_BASE=${ANTHROPIC_API_BASE:-https://api.anthropic.com}
 Environment=PROXY_PORT=${PROXY_PORT:-8080}
 Environment=UPSTREAM_READ_TIMEOUT=${UPSTREAM_READ_TIMEOUT:-300}
+Environment=REDIS_URL=${REDIS_URL:-redis://localhost:6379}
+Environment=USER_DB_PATH=$APP_DIR/data/users.db
 ExecStart=$APP_DIR/venv/bin/uvicorn proxy:app --host 0.0.0.0 --port 8080
 Restart=always
 RestartSec=5

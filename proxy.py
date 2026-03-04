@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import time
 from contextlib import asynccontextmanager
@@ -11,6 +12,7 @@ from starlette.background import BackgroundTask
 
 from config import ANTHROPIC_API_BASE, UPSTREAM_READ_TIMEOUT
 from logger import AsyncJSONLLogger, mask_headers, new_request_id
+from user_tracker import UserTracker
 
 HOP_BY_HOP_HEADERS = frozenset(
     {
@@ -28,6 +30,7 @@ HOP_BY_HOP_HEADERS = frozenset(
 
 logger = AsyncJSONLLogger()
 http_client: httpx.AsyncClient = None  # type: ignore[assignment]
+tracker = UserTracker()
 
 
 @asynccontextmanager
@@ -39,7 +42,9 @@ async def lifespan(app: FastAPI):
         follow_redirects=True,
     )
     await logger.start()
+    await tracker.start()
     yield
+    await tracker.stop()
     await logger.stop()
     await http_client.aclose()
 
@@ -50,6 +55,26 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/stats")
+async def stats():
+    return await tracker.get_stats()
+
+
+def extract_and_hash_api_key(headers: dict[str, str]) -> str | None:
+    key = None
+    for k, v in headers.items():
+        lower = k.lower()
+        if lower == "x-api-key":
+            key = v
+            break
+        if lower == "authorization" and v.lower().startswith("bearer "):
+            key = v[7:]
+            break
+    if not key:
+        return None
+    return hashlib.sha256(key.encode()).hexdigest()
 
 
 def forward_headers(request_headers: dict[str, str]) -> dict[str, str]:
@@ -121,6 +146,10 @@ async def proxy(request: Request, path: str):
     url = f"/v1/{path}"
     streaming = is_streaming(body)
     session_info = extract_session_info(raw_headers, body)
+
+    key_hash = extract_and_hash_api_key(raw_headers)
+    if key_hash:
+        await tracker.track(key_hash)
 
     should_log = (url == "/v1/messages")
     if should_log:

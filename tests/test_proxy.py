@@ -18,7 +18,8 @@ _test_log_dir = tempfile.mkdtemp()
 os.environ["LOG_DIR"] = _test_log_dir
 
 from logger import AsyncJSONLLogger, mask_api_key, mask_headers, new_request_id
-from proxy import app, extract_session_info
+from proxy import app, extract_and_hash_api_key, extract_session_info
+from user_tracker import UserTracker
 
 
 @pytest.fixture
@@ -246,3 +247,125 @@ class TestPathPassthrough:
 
         assert resp.status_code == 200
         assert resp.json()["input_tokens"] == 10
+
+
+# --- Unit tests for extract_and_hash_api_key ---
+
+
+class TestExtractAndHashApiKey:
+    def test_x_api_key_header(self):
+        result = extract_and_hash_api_key({"x-api-key": "sk-ant-api03-test123"})
+        assert result is not None
+        assert len(result) == 64  # SHA-256 hex digest
+
+    def test_authorization_bearer_header(self):
+        result = extract_and_hash_api_key({"authorization": "Bearer sk-ant-api03-test123"})
+        assert result is not None
+        assert len(result) == 64
+
+    def test_same_key_same_hash(self):
+        key = "sk-ant-api03-mysecretkey"
+        h1 = extract_and_hash_api_key({"x-api-key": key})
+        h2 = extract_and_hash_api_key({"authorization": f"Bearer {key}"})
+        assert h1 == h2
+
+    def test_different_keys_different_hashes(self):
+        h1 = extract_and_hash_api_key({"x-api-key": "key-one"})
+        h2 = extract_and_hash_api_key({"x-api-key": "key-two"})
+        assert h1 != h2
+
+    def test_no_key_returns_none(self):
+        assert extract_and_hash_api_key({"content-type": "application/json"}) is None
+
+    def test_empty_headers_returns_none(self):
+        assert extract_and_hash_api_key({}) is None
+
+    def test_x_api_key_preferred_over_authorization(self):
+        h_direct = extract_and_hash_api_key({"x-api-key": "key-a"})
+        h_both = extract_and_hash_api_key({
+            "x-api-key": "key-a",
+            "authorization": "Bearer key-b",
+        })
+        assert h_direct == h_both
+
+
+# --- Unit tests for UserTracker ---
+
+
+@pytest.fixture
+def user_db_path(tmp_path):
+    return str(tmp_path / "test_users.db")
+
+
+class TestUserTracker:
+    @pytest.mark.asyncio
+    async def test_tracks_new_user(self, user_db_path):
+        with patch("user_tracker.REDIS_URL", "redis://nonexistent:9999"), \
+             patch("user_tracker.USER_DB_PATH", user_db_path):
+            t = UserTracker()
+            await t.start()
+            await t.track("hash_aaa")
+            stats = await t.get_stats()
+            assert stats["unique_users"] == 1
+            assert stats["unique_users_today"] == 1
+            await t.stop()
+
+    @pytest.mark.asyncio
+    async def test_deduplicates(self, user_db_path):
+        with patch("user_tracker.REDIS_URL", "redis://nonexistent:9999"), \
+             patch("user_tracker.USER_DB_PATH", user_db_path):
+            t = UserTracker()
+            await t.start()
+            await t.track("hash_bbb")
+            await t.track("hash_bbb")
+            await t.track("hash_bbb")
+            stats = await t.get_stats()
+            assert stats["unique_users"] == 1
+            await t.stop()
+
+    @pytest.mark.asyncio
+    async def test_multiple_users(self, user_db_path):
+        with patch("user_tracker.REDIS_URL", "redis://nonexistent:9999"), \
+             patch("user_tracker.USER_DB_PATH", user_db_path):
+            t = UserTracker()
+            await t.start()
+            await t.track("hash_1")
+            await t.track("hash_2")
+            await t.track("hash_3")
+            stats = await t.get_stats()
+            assert stats["unique_users"] == 3
+            await t.stop()
+
+    @pytest.mark.asyncio
+    async def test_survives_redis_failure(self, user_db_path):
+        with patch("user_tracker.REDIS_URL", "redis://nonexistent:9999"), \
+             patch("user_tracker.USER_DB_PATH", user_db_path):
+            t = UserTracker()
+            await t.start()
+            assert t._redis is None  # Redis should have failed to connect
+            await t.track("hash_ccc")
+            stats = await t.get_stats()
+            assert stats["unique_users"] == 1
+            await t.stop()
+
+    @pytest.mark.asyncio
+    async def test_stats_empty_initially(self, user_db_path):
+        with patch("user_tracker.REDIS_URL", "redis://nonexistent:9999"), \
+             patch("user_tracker.USER_DB_PATH", user_db_path):
+            t = UserTracker()
+            await t.start()
+            stats = await t.get_stats()
+            assert stats == {"unique_users": 0, "unique_users_today": 0}
+            await t.stop()
+
+
+# --- Integration test for /stats endpoint ---
+
+
+class TestStatsEndpoint:
+    def test_stats_endpoint(self, client):
+        resp = client.get("/stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "unique_users" in data
+        assert "unique_users_today" in data
